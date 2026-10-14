@@ -96,3 +96,24 @@ sudo ufw enable
 | 01-clean-install   | 2026-10-06 14:07 |
 | 02-keys-configured | 2026-10-06 23:59 |
 | 03-ssh-hardened    | 2026-10-07 00:23 |
+
+## 8. Веб-сервер
+
+- Пакет: `nginx` (1.24.0, Ubuntu): `sudo apt install -y nginx`
+- Конфигурация ресурса: `/etc/nginx/sites-available/devops-site`, активируется ссылкой в `sites-enabled/`; стандартный ресурс отключён (`sudo rm /etc/nginx/sites-enabled/default`)
+- Каталог ресурса: `/var/www/devops-site`, владелец `devops:devops`, права 755 у каталога и 644 у файлов
+- Сертификат: `/etc/ssl/certs/devops.crt` (root, 644); ключ: `/etc/ssl/private/devops.key` (root, 600)
+- Формирование сертификата (самоподписанный, 365 дней, SAN для devops.local):
+
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key \
+  -out /etc/ssl/certs/devops.crt \
+  -subj "/CN=devops.local" \
+  -addext "subjectAltName=DNS:devops.local"
+```
+
+- Конфигурация ресурса: два блока server: порт 80 возвращает `301 https://$host$request_uri`; порт 443 (`ssl`, TLSv1.2 и TLSv1.3, `server_name devops.local`, `root /var/www/devops-site`, `index index.html`, `try_files $uri $uri/ =404`, `error_page 404 /404.html`, журналы `/var/log/nginx/devops-site.{access,error}.log`)
+- Применение: `sudo nginx -t && sudo systemctl reload nginx`
+- Содержимое доставляется `scripts/deploy.sh`; сертификат `~/devops.crt` копируется на хост через `scp` из `/etc/ssl/certs/devops.crt`
+- Порты 80 и 443 разрешены в ufw (раздел 6)
