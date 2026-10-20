@@ -117,3 +117,26 @@ sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 - Применение: `sudo nginx -t && sudo systemctl reload nginx`
 - Содержимое доставляется `scripts/deploy.sh`; сертификат `~/devops.crt` копируется на хост через `scp` из `/etc/ssl/certs/devops.crt`
 - Порты 80 и 443 разрешены в ufw (раздел 6)
+
+## 9. Контейнеризация
+
+- Docker Engine 29.9.1 и плагин Compose v5.6.0 из официального репозитория Docker (docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin); пакет docker.io не используется
+- Группа docker: devops (`sudo usermod -aG docker devops`, затем новая сессия). Участник группы фактически получает права root, поэтому в группу включаются только учётные записи с sudo
+- Проект: `~/app` на сервере (доставляется с хоста через `rsync -avz --delete --exclude=.env app/ devops:app/`), состав: app.py, requirements.txt, Dockerfile, .dockerignore, docker-compose.yml, .env.example
+- Файл `~/app/.env`: только на сервере, права 600, владелец devops, создаётся из `.env.example`: `cp .env.example .env && chmod 600 .env && sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" .env`; в репозиторий не добавляется (`.gitignore`)
+- Сервисы: db (postgres:16-alpine, healthcheck pg_isready), app (devops-app:1.0, процесс от пользователя app); сеть app_backend (bridge); запуск: `docker compose up -d --build`
+- Порты: приложение опубликовано только на 127.0.0.1:5000, порт СУБД 5432 не опубликован
+- Том: app_db_data (данные PostgreSQL); `docker compose down` его сохраняет, `docker compose down -v` удаляет
+- Обратный прокси: в блок server (listen 443) файла /etc/nginx/sites-available/devops-site добавлено:
+
+```nginx
+location /app/ {
+    proxy_pass http://127.0.0.1:5000/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Применение: `sudo nginx -t && sudo systemctl reload nginx`. Статический ресурс на `/` сохранён
